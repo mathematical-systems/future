@@ -2,6 +2,7 @@
 
 (defstruct (queue (:constructor %make-queue))
   (mutex (make-mutex :name "queue-lock"))
+  (cond-var (make-condition-variable))
   head
   tail)
 
@@ -13,7 +14,7 @@
 (defmacro defqfun (name args &body body)
   `(defun ,name ,args
      (with-slots (head tail) queue
-       (with-mutex (queue-mutex queue)
+       (with-mutex ((queue-mutex queue))
          ,@body))))
 
 ;;
@@ -26,7 +27,7 @@
   (eq head tail))
 
 (defqfun queue-empty! (queue)
-  (setf tail '(%end%))
+  (setf tail (list '%end%))
   (setf head tail)
   queue)
 
@@ -42,6 +43,34 @@
       (values (pop head) t)))
 
 (defqfun queue-delete-item (item queue &key (test #'eql) key)
-  (setf head (remove item head :test test :key key))
+  (setf head (delete item head :test test :key key))
   queue)
 
+(defmacro with-timeout ((seconds &body timeout-body) &body body)
+  #+sbcl `(handler-case
+              (sb-ext:with-timeout ,seconds
+                ,@body)
+            (sb-ext:timeout ()
+              ,@timeout-body))
+  #+allegro `(sys:with-timeout (,seconds ,@timeout-body)
+               ,@body))
+
+(defun wait-for-new-items (queue &key timeout)
+  "NOTE: Like cond-var, it requires the current thread to hold the mutex of the queue."
+  (unless timeout
+    (setf timeout most-positive-fixnum))
+  (with-timeout (timeout :timeout)
+    (wait-condition-variable (queue-cond-var queue) (queue-mutex queue))))
+
+(defqfun queue-notify (queue)
+  (notify-condition-variable (queue-cond-var queue)))
+
+#|  example
+
+(with-mutex ((queue-mutex queue))
+  (loop
+    (wait-for-new-items queue)
+    (let ((task (dequeue queue)))
+      (dosomething task))))
+
+|#

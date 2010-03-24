@@ -4,12 +4,13 @@
            #:touch
            #:wait-for-future
            #:wait-for-any-future
-           #:wait-for-all-futures
+           ;;#:wait-for-all-futures
            #:kill-future
            #:kill-all-futures
-           #:*before-fork-hooks*
-           #:*after-fork-hooks* 
+           #:*before-start-hooks*
+           #:*after-finish-hooks* 
            #:*future-max-threads*
            #:initialize-environment
-           #:with-new-environment))
+           #:with-new-environment
+           ))
 
