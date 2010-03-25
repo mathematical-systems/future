@@ -1,9 +1,15 @@
 (in-package :future)
 
 (defvar *future-max-threads* 4)
-
 (defvar *finished-futures* (make-queue))
-(defvar *thread-pool* (make-thread-pool))
+(defvar *thread-pool* (make-thread-pool :limit *future-max-threads*))
+
+(defun future-max-threads ()
+  *future-max-threads*)
+
+(defun (setf future-max-threads) (newval)
+  (setf (thread-pool-limit *thread-pool*) newval)
+  (setf *future-max-threads* newval))
 
 (defvar *after-finish-hooks* nil)
 (defvar *before-start-hooks* nil)
@@ -27,7 +33,7 @@
 (defun initialize-environment (&key kill-current-futures-p)
   (when kill-current-futures-p
     (kill-all-futures))
-  (setf *thread-pool* (make-thread-pool)))
+  (setf *thread-pool* (make-thread-pool :limit *future-max-threads*)))
 
 (defmacro with-new-environment (() &body body)
   `(let (*thread-pool*
@@ -58,7 +64,8 @@
       (wait-condition-variable (queue-cond-var queue) (queue-mutex queue))
       (dequeue queue))))
 
-;; wait-for-all-futures
+(defun wait-for-all-futures (futures)
+  (mapc #'wait-for-future futures))
 
 (defun kill-future (future)
   (unless (future-finished-p future)

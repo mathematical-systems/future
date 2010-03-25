@@ -9,7 +9,7 @@
 
 (defstruct thread-pool
   (mutex (make-mutex :name "Thread pool mutex"))
-  (limit *future-max-threads*)
+  (limit 16)
   (thread-count 0)
   (idle-thread-count 0)
   threads
@@ -62,9 +62,7 @@
       thread)))
 
 (deftpfun assign-task (task thread-pool)
-  (if (or (thread-pool-empty-p thread-pool)
-          (and (zerop idle-thread-count)
-               (not (thread-pool-full-p thread-pool))))
+  (if (not (thread-pool-full-p thread-pool))
       (make-active-thread task thread-pool)
       (progn
         (enqueue task task-queue)
