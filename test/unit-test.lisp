@@ -4,6 +4,123 @@
 
 (defsuite* unit-test)
 
+;;; queue
+(defvar *empty-queue*)
+(defvar *sample-queue*)
+
+(defixture queue
+  (setf *empty-queue* (future::make-queue))
+  (setf *sample-queue* (future::make-queue :initial-content #(1 2 3))))
+
+(defun push-pull (queue pause-time)
+  (future::enqueue 1 queue)
+  (future::enqueue 2 queue)
+  (future::enqueue 3 queue)
+  (when pause-time
+    (sleep (random pause-time)))
+  (future::dequeue queue)
+  (future::dequeue queue)
+  (future::dequeue queue))
+
+(deftest simple-queue-tests ()
+  (with-fixture queue
+    (is (= 0 (future::queue-length *empty-queue*)))
+    (is (= 3 (future::queue-length *sample-queue*)))
+    (is (future::queue-empty-p *empty-queue*))
+    (is (not (future::queue-empty-p *sample-queue*)))
+    ;;
+    (future::enqueue 1 *empty-queue*)
+    (is (= 1 (future::queue-length *empty-queue*)))
+    (is (not (future::queue-empty-p *empty-queue*)))
+    ;;
+    (future::queue-empty! *empty-queue*)
+    (is (= 0 (future::queue-length *empty-queue*)))
+    (is (future::queue-empty-p *empty-queue*))
+    ;;
+    (push-pull *empty-queue* 0.01)
+    (is (= 0 (future::queue-length *empty-queue*)))
+    (is (future::queue-empty-p *empty-queue*))
+    ;;
+    (future::queue-delete-item 2 *sample-queue*)
+    (is (= 2 (future::queue-length *sample-queue*)))
+    (is (= 1 (future::dequeue *sample-queue*)))
+    (is (= 3 (future::dequeue *sample-queue*)))
+    (is (= 0 (future::queue-length *sample-queue*)))
+    (is (future::queue-empty-p *sample-queue*))
+    ;;
+    (future::with-mutex ((future::queue-mutex *empty-queue*))
+      (future::wait-for-new-items *empty-queue* :timeout 0.1)
+      (is (eq nil (future::dequeue *empty-queue*))))
+    ;;
+    (future::join-threads
+     (list
+      (future::spawn-thread
+       (lambda ()
+         (future::with-mutex ((future::queue-mutex *empty-queue*))
+           (future::wait-for-new-items *empty-queue* :timeout 1)
+           (is (= 1 (future::dequeue *empty-queue*))))))
+      (future::spawn-thread
+       (lambda ()
+         (future::with-mutex ((future::queue-mutex *empty-queue*))
+           (future::enqueue 1 *empty-queue*)
+           (future::queue-notify *empty-queue*))))))
+    (is (= 0 (future::queue-length *empty-queue*)))
+    (is (future::queue-empty-p *empty-queue*))
+    ))
+
+
+;;;
+(defvar *thread-pool*)
+
+(defixture thread-pool
+  (setf *thread-pool* (future::make-thread-pool :limit 3 :keep-alive-seconds 1)))
+
+(deftest thread-pool-test ()
+  (with-fixture thread-pool
+    (is (future::thread-pool-empty-p *thread-pool*))
+    (is (= 0 (future::thread-pool-idle-thread-count *thread-pool*)))
+    (is (= 0 (length (future::thread-pool-threads *thread-pool*))))
+    (is (future::queue-empty-p (future::thread-pool-task-queue *thread-pool*)))
+    (is (not (future::thread-pool-full-p *thread-pool*)))
+    ;;
+    (future::assign-task (lambda () (sleep 1)) *thread-pool*)
+    (is (not (future::thread-pool-empty-p *thread-pool*)))
+    (is (= 0 (future::thread-pool-idle-thread-count *thread-pool*)))
+    (is (= 1 (length (future::thread-pool-threads *thread-pool*))))
+    (is (future::queue-empty-p (future::thread-pool-task-queue *thread-pool*)))
+    (is (not (future::thread-pool-full-p *thread-pool*)))
+    (future::assign-task (lambda () (sleep 1)) *thread-pool*)
+    (future::assign-task (lambda () (sleep 1)) *thread-pool*)
+    (is (future::thread-pool-full-p *thread-pool*))
+    (is (= 0 (future::thread-pool-idle-thread-count *thread-pool*)))
+    (is (= 3 (length (future::thread-pool-threads *thread-pool*))))
+    (is (future::queue-empty-p (future::thread-pool-task-queue *thread-pool*)))
+    (future::assign-task (lambda () (sleep 1)) *thread-pool*)
+    (is (future::thread-pool-full-p *thread-pool*))
+    (is (= 0 (future::thread-pool-idle-thread-count *thread-pool*)))
+    (is (= 3 (length (future::thread-pool-threads *thread-pool*))))
+    (is (not (future::queue-empty-p (future::thread-pool-task-queue *thread-pool*))))
+    ;;
+    (future::join-threads (future::thread-pool-threads *thread-pool*))
+    (is (future::thread-pool-empty-p *thread-pool*))
+    (is (= 0 (future::thread-pool-idle-thread-count *thread-pool*)))
+    (is (= 0 (length (future::thread-pool-threads *thread-pool*))))
+    (is (future::queue-empty-p (future::thread-pool-task-queue *thread-pool*)))
+    (is (not (future::thread-pool-full-p *thread-pool*)))
+    ;;
+    (future::assign-task (lambda () (sleep 1)) *thread-pool*)
+    (sleep 0.5)
+    (future::reset-thread-pool *thread-pool*)
+    (is (future::thread-pool-empty-p *thread-pool*))
+    (is (= 0 (future::thread-pool-idle-thread-count *thread-pool*)))
+    (is (= 0 (length (future::thread-pool-threads *thread-pool*))))
+    (is (future::queue-empty-p (future::thread-pool-task-queue *thread-pool*)))
+    (is (not (future::thread-pool-full-p *thread-pool*)))
+    ;;
+    ))
+
+
+;;; future
 (deftest 1+1-is-2 ()
   (assert-no-futures)
   (is (= 2 (touch (future (+ 1 1)))))

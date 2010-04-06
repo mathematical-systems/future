@@ -1,7 +1,5 @@
 (in-package :future)
 
-(defvar *thread-keep-alive-seconds* 30)
-
 (deftype task () 'function)
 
 (defun run-task (task)
@@ -9,11 +7,12 @@
 
 (defstruct thread-pool
   (mutex (make-mutex :name "Thread pool mutex"))
-  (limit 16)
+  (limit 4)
   (thread-count 0)
   (idle-thread-count 0)
   threads
-  (task-queue (make-queue)))
+  (task-queue (make-queue))
+  (keep-alive-seconds 30))
 
 (defmacro deftpfun (name args &body body)
   `(defun ,name ,args
@@ -41,7 +40,7 @@
                   (incf idle-thread-count)
                   (when (eq :timeout
                             (prog1
-                                (wait-for-new-items task-queue :timeout *thread-keep-alive-seconds*)
+                                (wait-for-new-items task-queue :timeout (thread-pool-keep-alive-seconds thread-pool))
                               (decf idle-thread-count)))
                     (go :quit)) 
                   (go :run-next))

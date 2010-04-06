@@ -18,6 +18,12 @@
     #+sbcl (sb-thread:terminate-thread thread)
     #+allegro (mp:process-kill thread)))
 
+(defun join-threads (threads)
+  #+sbcl (loop for thread in threads
+               do (sb-thread:join-thread thread))
+  #+allegro (loop for thread in threads
+                  do (mp:process-wait "join" (complement #'mp:process-alive-p))))
+
 ;;
 (defun make-mutex (&key name owner)
   #+sbcl (sb-thread:make-mutex :name name :%owner owner)
@@ -54,13 +60,12 @@
 
 (defun wait-condition-variable (cond-var mutex)
   #+sbcl (sb-thread:condition-wait cond-var mutex)
-  #+allegro (let (relock)
-              (when (holding-mutex-p mutex)
-                (release-mutex mutex)
-                (setf relock t))
-              (mp:process-wait "Wait cond var" #'mp:gate-open-p cond-var)
-              (when relock
-                (get-mutex mutex))))
+  #+allegro (unwind-protect
+                 (progn
+                   (assert (holding-mutex-p mutex))
+                   (release-mutex mutex)
+                   (mp:process-wait "Wait cond var" #'mp:gate-open-p cond-var))
+              (get-mutex mutex)))
 
 (defun notify-condition-variable (cond-var)
   #+sbcl (sb-thread:condition-notify cond-var)
