@@ -14,20 +14,18 @@
 (defvar *after-finish-hooks* nil)
 (defvar *before-start-hooks* nil)
 
-(defclass future ()
-  ((lambda :accessor lambda-of
-     :initarg :lambda
-     :initform (error "Must provide lambda for future"))
-   (current-thread :accessor current-thread-of :initform nil)
-   (result :accessor result-of :initform 'unbound)))
+(defstruct future 
+  (lambda (error "Must provide lambda for future") :type function)
+  current-thread
+  (result 'unbound))
 
 (defmethod print-object ((f future) stream)
-  (with-accessors ((result result-of) (current-thread current-thread-of)) f
+  (with-slots (result current-thread) f
     (print-unreadable-object (f stream :type t :identity t)
       (format stream "RESULT: ~A, CURRENT-THREAD: ~A" result current-thread))))
 
 (defun future-finished-p (future)
-  (not (eq (result-of future) 'unbound)))
+  (not (eq (future-result future) 'unbound)))
 
 ;;; 
 (defun initialize-environment (&key kill-current-futures-p)
@@ -47,16 +45,15 @@
 ;;;
 (defun wait-for-future (future)
   (let ((queue *finished-futures*))
-    (when (not (future-finished-p future))
-      (with-mutex ((queue-mutex queue))
-        (loop
-          (tagbody
-           :continue
-             (multiple-value-bind (finished-future available-p) (dequeue queue)
-               (if available-p
-                   (when (eq finished-future future)
-                     (return future))
-                   (wait-condition-variable (queue-cond-var queue) (queue-mutex queue))))))))))
+    (loop until (future-finished-p future)
+          do
+       (with-mutex ((queue-mutex queue))
+         (multiple-value-bind (finished-future available-p) (dequeue queue)
+           (if available-p
+               (when (eq finished-future future)
+                 (return future))
+               (wait-condition-variable (queue-cond-var queue) (queue-mutex queue))))))
+    future))
 
 (defun wait-for-any-future ()
   (let ((queue *finished-futures*))
@@ -68,14 +65,16 @@
   (mapc #'wait-for-future futures))
 
 (defun kill-future (future)
-  (unless (future-finished-p future)
-    (with-mutex ((thread-pool-mutex *thread-pool*))
-      (let ((future-thread (current-thread-of future)))
-        (when future-thread
-          (kill-thread future-thread))
-        (queue-delete-item (lambda-of future) (thread-pool-task-queue *thread-pool*))
-        (queue-delete-item future *finished-futures*)
-        nil)))) 
+  (let ((thread-pool *thread-pool*))
+    (unless (future-finished-p future)
+      (with-mutex ((thread-pool-mutex thread-pool))
+        (let ((future-thread (future-current-thread future)))
+          (when (and future-thread (not (future-finished-p future)))
+            (kill-thread future-thread)
+            (decf (thread-pool-thread-count thread-pool)))
+          (queue-delete-item (future-lambda future) (thread-pool-task-queue thread-pool))
+          (queue-delete-item future *finished-futures*)
+          nil))))) 
 
 (defun kill-all-futures ()
   ;; NOTE: this is special
@@ -85,14 +84,14 @@
 (defun eval-future (fn)
   (let ((future (make-instance 'future :lambda nil)))
     (labels ((future-body ()
-               (setf (current-thread-of future) (current-thread))
+               (setf (future-current-thread future) (current-thread))
                (let ((result (funcall fn)))
-                 (setf (result-of future) result)
+                 (setf (future-result future) result)
                  (enqueue future *finished-futures*)
-                 (setf (current-thread-of future) nil)
+                 (setf (future-current-thread future) nil)
                  (queue-notify *finished-futures*))))
-      (setf (lambda-of future) #'future-body)
-      (assign-task (lambda-of future) *thread-pool*)
+      (setf (future-lambda future) #'future-body)
+      (assign-task (future-lambda future) *thread-pool*)
       future)))
 
 (defmacro future (&body body)
@@ -103,5 +102,5 @@
 evaluated values. Blocks if a future is still running."
   (with-slots (result) future
     (wait-for-future future) 
-    (result-of future)))
+    (future-result future)))
 
