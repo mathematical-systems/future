@@ -1,6 +1,8 @@
 (in-package :future-test)
 
 (defun running-futures-count ()
+  (is (= (length (future::thread-pool-threads future::*thread-pool*))
+         (future::thread-pool-thread-count future::*thread-pool*)))
   (- (future::thread-pool-thread-count future::*thread-pool*)
      (future::thread-pool-idle-thread-count future::*thread-pool*)))
 

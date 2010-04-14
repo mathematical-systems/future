@@ -1,8 +1,9 @@
 (in-package :future)
 
 (defvar *future-max-threads* 4)
-(defvar *finished-futures* (make-queue))
 (defvar *thread-pool* (make-thread-pool :limit *future-max-threads*))
+
+(defstruct (future (:include task)))
 
 (defun future-max-threads ()
   *future-max-threads*)
@@ -14,16 +15,6 @@
 (defvar *after-finish-hooks* nil)
 (defvar *before-start-hooks* nil)
 
-(defstruct future 
-  (lambda (error "Must provide lambda for future"))
-  current-thread
-  (result 'unbound))
-
-(defmethod print-object ((f future) stream)
-  (with-slots (result current-thread) f
-    (print-unreadable-object (f stream :type t :identity t)
-      (format stream "RESULT: ~A, CURRENT-THREAD: ~A" result current-thread))))
-
 (defun future-finished-p (future)
   (not (eq (future-result future) 'unbound)))
 
@@ -31,26 +22,24 @@
 (defun initialize-environment (&key kill-current-futures-p)
   (when kill-current-futures-p
     (kill-all-futures))
-  (setf *thread-pool* (make-thread-pool :limit *future-max-threads*))
-  (setf *finished-futures* (make-queue)))
+  (setf *thread-pool* (make-thread-pool :limit *future-max-threads*)))
 
 (defmacro with-new-environment (() &body body)
   `(let (*thread-pool*
          (*future-max-threads* *future-max-threads*)
          *after-finish-hooks*
-         *before-start-hooks*
-         *finished-futures*)
+         *before-start-hooks*)
      (initialize-environment)
      (locally
          ,@body)))
 
 ;;;
 (defun pop-all-finished-futures ()
-  (let ((queue *finished-futures*))
+  (let ((queue (thread-pool-finished-tasks *thread-pool*)))
     (loop while (nth-value 1 (dequeue queue)))))
 
 (defun wait-for-future (future)
-  (let ((queue *finished-futures*))
+  (let ((queue (thread-pool-finished-tasks *thread-pool*)))
     (loop until (future-finished-p future)
           do
        (with-mutex ((queue-mutex queue))
@@ -63,7 +52,7 @@
     future))
 
 (defun wait-for-any-future ()
-  (let ((queue *finished-futures*))
+  (let ((queue (thread-pool-finished-tasks *thread-pool*)))
     (with-mutex ((queue-mutex queue))
       (multiple-value-bind (finished-future available-p) (dequeue queue)
         (if available-p
@@ -79,42 +68,42 @@
   (let ((thread-pool *thread-pool*))
     (unless (future-finished-p future)
       (with-mutex ((thread-pool-mutex thread-pool))
-        (let ((future-thread (future-current-thread future)))
-          (when (and future-thread (not (future-finished-p future)))
+        (let ((future-thread (future-thread future)))
+          (when (and future-thread
+                     (not (future-finished-p future))
+                     (thread-alive-p future-thread))
             (kill-thread future-thread)
-            (setf (future-current-thread future) nil)
-            (if (queue-empty-p (thread-pool-task-queue thread-pool))
-                (decf (thread-pool-thread-count thread-pool))
-                (let ((task (dequeue (thread-pool-task-queue thread-pool))))
-                  (when task
-                    (assign-task task thread-pool)))))
-          (queue-delete-item (future-lambda future) (thread-pool-task-queue thread-pool)))))
-    ;; remove it when finished
-    ;; (queue-delete-item future *finished-futures*)
+            (setf (future-thread future) nil)
+            (setf (thread-pool-threads thread-pool)
+                  (delete future-thread (thread-pool-threads thread-pool)))
+            (decf (thread-pool-thread-count thread-pool))
+            (unless (queue-empty-p (thread-pool-task-queue thread-pool))
+              (let ((task (dequeue (thread-pool-task-queue thread-pool))))
+                (when task
+                  (assign-task task thread-pool :record-finished-tasks t)))))
+          (queue-delete-item future (thread-pool-task-queue thread-pool)))))
     ;; use pop-all-finished-futures is better
     (pop-all-finished-futures)
     nil)) 
 
 (defun kill-all-futures ()
   ;; NOTE: this is special
-  (reset-thread-pool *thread-pool*)
-  (queue-empty! *finished-futures*))
+  (reset-thread-pool *thread-pool*))
 
-(defun eval-future (fn)
-  (let ((future (make-future :lambda nil)))
-    (labels ((future-body ()
-               (setf (future-current-thread future) (current-thread))
-               (let ((result (funcall fn)))
-                 (setf (future-result future) result)
-                 (setf (future-current-thread future) nil)
-                 (enqueue future *finished-futures*)
-                 (queue-notify *finished-futures*))))
-      (setf (future-lambda future) #'future-body)
-      (assign-task (future-lambda future) *thread-pool*)
-      future)))
+(defun eval-future (fn &optional args future)
+  (let ((future (or future (make-future))))
+    (declare (type future future))
+    (setf (future-function future) fn)
+    (setf (future-args future) args)
+    (setf (future-result future) 'unbound)
+    (assign-task future *thread-pool* :record-finished-tasks t)
+    future))
 
 (defmacro future (&body body)
   `(eval-future #'(lambda () ,@body)))
+
+(defun future-funcall (function &optional args future)
+  (eval-future function args future))
 
 (defun touch (future)
   (wait-for-future future) 

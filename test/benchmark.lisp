@@ -22,3 +22,22 @@
   (loop repeat times
         for r = (fib x)
         collect r))
+
+(defun benchmark-map-reduce (x threads times)
+  (kill-all-futures)
+  (let ((future-pool (make-array threads)))
+    (loop for i below threads
+          do
+       (setf (aref future-pool i)
+             (future::make-future)))
+    (loop repeat times
+          do
+       (wait-for-all-futures
+        (loop for i below threads
+              collect
+           (future-funcall 'fib (list x) (aref future-pool i)))))))
+
+
+#|
+(time (benchmark-map-reduce 22 32 1000))
+|#

@@ -88,6 +88,6 @@
 
 (defmacro with-waitqueue-mutex ((waitqueue) &body body)
   (alexandria:once-only (waitqueue)
-    `(with-mutex (,waitqueue)
+    `(with-mutex ((waitqueue-lock ,waitqueue))
        ,@body)))
 

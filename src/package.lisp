@@ -1,6 +1,7 @@
 (cl:defpackage :future
     (:use :cl)
   (:export #:future
+           #:future-funcall
            #:touch
            #:wait-for-future
            #:wait-for-any-future

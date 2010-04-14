@@ -5,7 +5,7 @@
 (defsuite* stress-test)
 
 (deftest simple-queue-push-pull-test ()
-  (with-fixture thread-pool
+  (with-fixture queue
     (let ((queue (future::make-queue)))
       (future::join-threads
        (loop repeat 10
@@ -40,17 +40,16 @@
 
 (deftest thread-pool-reset-test ()
   (with-fixture thread-pool
-    (with-fixture thread-pool
-      (loop repeat 1000
-            do
-         (progn
-           (loop repeat 10
-                 do
-              (future::assign-task (lambda () (sleep 1)) *thread-pool*))
-           (sleep 0.05)
-           (is (future::thread-pool-full-p *thread-pool*))
-           (future::reset-thread-pool *thread-pool*)
-           (is (future::thread-pool-empty-p *thread-pool*)))))))
+    (loop repeat 1000
+          do
+       (progn
+         (loop repeat 10
+               do
+            (future::assign-task (future::make-future :function (lambda () (sleep 1))) *thread-pool*))
+         (sleep 0.05)
+         (is (future::thread-pool-full-p *thread-pool*))
+         (future::reset-thread-pool *thread-pool*)
+         (is (future::thread-pool-empty-p *thread-pool*))))))
 
 
 (deftest 100p-100times ()
