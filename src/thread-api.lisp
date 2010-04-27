@@ -1,5 +1,16 @@
 (in-package :future)
 
+
+;;; utility
+(defmacro once-only (names &body body)
+  ;; Do not touch this code unless you really know what you're doing.
+  (let ((gensyms (loop for n in names collect (gensym))))
+    `(let (,@(loop for g in gensyms collect `(,g (gensym))))
+       `(let (,,@(loop for g in gensyms for n in names collect ``(,,g ,,n)))
+	  ,(let (,@(loop for n in names for g in gensyms collect `(,n ,g)))
+             ,@body)))))
+
+
 ;;; portable helper function
 (defun spawn-thread (function &key name)
   #+sbcl (sb-thread:make-thread function :name name)
@@ -87,7 +98,7 @@
   (notify-condition-variable (waitqueue-condition-variable waitqueue)))
 
 (defmacro with-waitqueue-mutex ((waitqueue) &body body)
-  (alexandria:once-only (waitqueue)
+  (once-only (waitqueue)
     `(with-mutex ((waitqueue-lock ,waitqueue))
        ,@body)))
 
