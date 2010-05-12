@@ -107,5 +107,5 @@
 
 (defun touch (future)
   (wait-for-future future) 
-  (future-result future))
+  (values-list (future-result future)))
 

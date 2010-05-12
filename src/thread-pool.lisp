@@ -7,11 +7,10 @@
   thread)
 
 (defun run-task (task)
-  (with-slots (function args result) task
-    (setf result
-          (if args
-              (apply function args)
-              (funcall function)))))
+  (with-slots (function args) task
+    (if args
+        (apply function args)
+        (funcall function))))
 
 (defstruct thread-pool
   (mutex (make-mutex :name "Thread pool mutex"))
@@ -45,7 +44,7 @@
                 (multiple-value-bind (task availabie-p) (dequeue task-queue)
                   (when availabie-p
                     (setf (task-thread task) (current-thread))
-                    (setf (task-result task) (run-task task))
+                    (setf (task-result task) (multiple-value-list (run-task task)))
                     (setf (task-thread task) nil)
                     (when record-finished-tasks
                       (enqueue task finished-tasks))
@@ -70,7 +69,7 @@
     (assert (not (thread-pool-full-p thread-pool)))
     (let ((thread (spawn-thread (lambda ()
                                   (setf (task-thread new-task) (current-thread))
-                                  (setf (task-result new-task) (run-task new-task))
+                                  (setf (task-result new-task) (multiple-value-list (run-task new-task)))
                                   (setf (task-thread new-task) nil)
                                   (when record-finished-tasks
                                     (enqueue new-task finished-tasks))

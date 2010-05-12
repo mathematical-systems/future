@@ -284,3 +284,12 @@
                 (+ (touch f1) (touch f2)))))))
       (is (= 12 (touch f1)))
       (assert-no-futures))))
+
+(deftest multiple-return-values-test ()
+  (with-fixture future-default-thread-pool
+    (assert-no-futures)
+    (multiple-value-bind (x y z)
+        (touch (future (values (+ 1 1) (+ 2 2) (+ 3 3))))
+      (is (= x 2))
+      (is (= y 4))
+      (is (= z 6)))))
